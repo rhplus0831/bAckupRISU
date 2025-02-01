@@ -157,6 +157,86 @@ function checkIsAlreadyProcessed(hash) {
     });
 }
 
+let downloadQueue = [];
+let isProcessing = false;
+
+function enqueueDownload(fn, blob, useRevision, time) {
+    downloadQueue.push({fn, blob, useRevision, time});
+    processQueue();
+}
+
+async function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+let queueCounterElement = null; // 큐 상태 표시 엘리먼트
+
+// 큐 상태 업데이트 함수
+function updateQueueCounter() {
+    if (!queueCounterElement) {
+        // 큐 상태를 표시하기 위한 HTML 요소 생성
+        queueCounterElement = document.createElement("div");
+        queueCounterElement.style.position = "fixed";
+        queueCounterElement.style.bottom = "20px";
+        queueCounterElement.style.left = "20px";
+        queueCounterElement.style.backgroundColor = "white";
+        queueCounterElement.style.color = "black";
+        queueCounterElement.style.padding = "5px 10px";
+        queueCounterElement.style.fontSize = "12px";
+        queueCounterElement.style.boxShadow = "0 2px 5px rgba(0, 0, 0, 0.2)";
+        queueCounterElement.style.borderRadius = "5px";
+        queueCounterElement.style.zIndex = "1000";
+        queueCounterElement.style.opacity = "0.8";
+        queueCounterElement.textContent = `남은 작업 수: ${downloadQueue.length}`; // 초기 값
+        document.body.appendChild(queueCounterElement);
+    } else {
+        // 기존 요소 업데이트
+        queueCounterElement.textContent = `남은 작업 수: ${downloadQueue.length}`;
+    }
+}
+
+async function processQueue() {
+    // 이미 다른 항목 처리 중이면 중복으로 돌지 않도록 종료
+    if (isProcessing) return;
+
+    //Add and display process status
+
+    isProcessing = true;
+
+    while (downloadQueue.length > 0) {
+        const {fn, blob, useRevision, time} = downloadQueue.shift();
+
+        function requestDownload(fn, blob, useRevision) {
+            const blobURL = URL.createObjectURL(blob);
+            console.log(`requestDownload: ${fn}, ${blobURL}, ${useRevision}`);
+            chrome.runtime.sendMessage({
+                command: "backup_file",
+                blobURL: blobURL,
+                name: fn
+            }, function (response) {
+                console.log(response);
+                URL.revokeObjectURL(blobURL);
+                if (useRevision) {
+                    const split = fn.split('.');
+                    const newFn = `${split[0]}_${time}.${split[1]}`;
+                    requestDownload(newFn, blob, false);
+                    return;
+                }
+            });
+        }
+
+        // 여기서 잠깐 대기
+        requestDownload(fn, blob, useRevision);
+        updateQueueCounter();
+        await delay(200);
+    }
+    isProcessing = false;
+    if(queueCounterElement) {
+        document.body.removeChild(queueCounterElement);
+        queueCounterElement = null;
+    }
+}
+
 async function backupWebsiteData() {
     const assetMap = []
 
@@ -192,32 +272,12 @@ async function backupWebsiteData() {
 
     const time = getCurrentDateTime();
 
-    function requestDownload(fn, blob, useRevision) {
-        const blobURL = URL.createObjectURL(blob);
-        console.log(`requestDownload: ${fn}, ${blobURL}, ${useRevision}`);
-        chrome.runtime.sendMessage({
-            command: "backup_file",
-            blobURL: blobURL,
-            name: fn
-        }, function (response) {
-            console.log(response);
-            URL.revokeObjectURL(blobURL);
-            if (useRevision) {
-                const split = fn.split('.');
-                const newFn = `${split[0]}_${time}.${split[1]}`;
-                requestDownload(newFn, blob, false);
-                return;
-            }
-        });
-    }
-
     request.onsuccess = (event) => {
         const cursor = event.target.result;
 
         if (cursor) {
             const key = cursor.key; // 커서로 현재 항목의 key 가져오기
             const value = cursor.value; // 커서로 현재 항목의 value 가져오기
-
 
             if (key.startsWith('assets')) {
                 const fn = key.split('/').pop();
@@ -232,15 +292,17 @@ async function backupWebsiteData() {
                         // cache(or memory) key and prevent double-save in future launch
 
                         const blob = new Blob([value], {type: 'application/octet-stream'});
-                        requestDownload(fn, blob, false);
+                        enqueueDownload(fn, blob, false, time);
                     }
                 }))
             } else if (key === 'database/database.bin') {
                 const blob = new Blob([value], {type: 'application/octet-stream'});
-                requestDownload('database.bin', blob, true);
+                enqueueDownload('database.bin', blob, true, time);
             }
 
-            cursor.continue(); // 다음 항목으로 커서를 이동
+            //add delay for requestDownload
+            cursor.continue();
+            // 다음 항목으로 커서를 이동
         } else {
             console.log("All key-value pairs have been processed."); // 순회 완료
 
