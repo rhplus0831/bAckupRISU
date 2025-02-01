@@ -1,0 +1,25 @@
+{
+  "manifest_version": 3,
+  "name": "bAckupRISU",
+  "version": "1.0",
+  "description": "Backup your risu",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting",
+    "downloads"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "*://*.risuai.xyz/*"
+      ],
+      "js": [
+        "content.js"
+      ]
+    }
+  ]
+}
