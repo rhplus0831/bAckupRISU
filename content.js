@@ -309,7 +309,7 @@ async function backupWebsiteData() {
             const jsonStr = JSON.stringify(assetMap);
             const jsonBlob = new Blob([jsonStr], {type: 'application/json'});
 
-            requestDownload('asset_map.json', jsonBlob, true);
+            enqueueDownload('asset_map.json', jsonBlob, true, time);
         }
     };
 }
